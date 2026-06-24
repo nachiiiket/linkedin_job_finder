@@ -1,0 +1,23 @@
+# Secrets & credentials
+.env
+config.json
+linkedin_session.json
+
+# Data & output files
+*.csv
+*.xlsx
+search_results/
+logs/
+*.log
+
+# Documentation (user requested no .md files)
+*.md
+
+# Virtual environment
+.venv/
+
+# Python cache
+__pycache__/
+*.pyc
+bot/__pycache__/
+tracker/__pycache__/

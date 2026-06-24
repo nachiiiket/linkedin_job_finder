@@ -1,0 +1,8 @@
+playwright==1.44.0
+asyncio
+aiohttp==3.9.5
+pandas==2.2.2
+rich==13.7.1
+python-dotenv==1.0.1
+requests==2.32.2
+openai
