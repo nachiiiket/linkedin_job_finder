@@ -10,8 +10,8 @@ search_results/
 logs/
 *.log
 
-# Documentation (user requested no .md files)
-*.md
+# Generated markdown (README.md is tracked by intent)
+search_results*.md
 
 # Virtual environment
 .venv/

@@ -1,0 +1,93 @@
+{
+  "search": {
+    "job_roles": [
+      "AI Engineer",
+      "ML Engineer",
+      "Machine Learning Engineer",
+      "Artificial Intelligence Engineer",
+      "AI/ML Engineer",
+      "Gen AI Engineer",
+      "Generative AI Engineer",
+      "AI Researcher",
+      "Deep Learning Engineer",
+      "NLP Engineer",
+      "Computer Vision Engineer",
+      "Prompt Engineer",
+      "LLM Engineer",
+      "MLOps Engineer",
+      "Data Scientist",
+      "Applied Scientist",
+      "AI Architect"
+    ],
+    "keywords": [],
+    "locations": [],
+    "easy_apply_only": true,
+    "posted_within_days": 1,
+    "max_jobs_per_run": 50,
+    "boolean_query": ""
+  },
+  "filters": {
+    "target_poster_titles": [
+      "Talent Acquisition", "Recruiter", "HR", "Hiring Manager",
+      "Technical Recruiter", "People Operations", "Talent Partner",
+      "Head of Talent", "VP of Engineering", "CTO", "Engineering Manager",
+      "Team Lead", "Tech Lead", "Senior Engineer", "Staff Engineer",
+      "Founder", "Co-Founder", "CEO", "Director of Engineering"
+    ],
+    "exclude_companies": [],
+    "exclude_keywords": ["senior only", "10+ years"]
+  },
+  "actions": {
+    "auto_easy_apply": false,
+    "send_connection_request": false,
+    "connection_message": "Hi {name}, I came across your post about the {position} role at {company}. I'd love to connect and explore the opportunity!",
+    "find_email": false,
+    "hunter_api_key": ""
+  },
+  "llm": {
+    "enabled": false
+  },
+  "post_search": {
+    "query_types": [
+      {
+        "type": "hiring_role",
+        "enabled": true,
+        "template": "\"Hiring\" AND \"{role}\"",
+        "sort_by": "date_posted",
+        "label_format": "{role}"
+      },
+      {
+        "type": "hiring_role_location",
+        "enabled": true,
+        "template": "\"Hiring\" AND \"{role}\" AND \"{location}\"",
+        "sort_by": "date_posted",
+        "label_format": "{role}_{location}",
+        "locations": ["Pune", "Bangalore", "Hyderabad"],
+        "companies": []
+      },
+      {
+        "type": "hiring_role_company",
+        "enabled": true,
+        "template": "\"Hiring\" AND \"{role}\" AND \"{company}\"",
+        "sort_by": "date_posted",
+        "label_format": "{role}_{company}",
+        "companies": []
+      }
+    ]
+  },
+  "output": {
+    "csv_file": "job_tracker.csv",
+    "log_file": "bot.log"
+  },
+  "browser": {
+    "headless": false,
+    "slow_mo_ms": 50,
+    "human_delay_min_ms": 800,
+    "human_delay_max_ms": 2500
+  },
+  "profile": {
+    "phone": "",
+    "resume_path": "",
+    "cover_letter": ""
+  }
+}
