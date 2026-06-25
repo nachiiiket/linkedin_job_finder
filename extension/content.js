@@ -1,131 +1,130 @@
-const SCRAPING_CONFIG_KEY = "activeScrapeConfig";
+const CFG_KEY = "activeScrapeConfig";
 
-let scrapingActive = false;
 let shouldStop = false;
 
-function postMessage(action, data) {
-  try { chrome.runtime.sendMessage({ action, ...(data || {}) }); } catch(e) {}
+function randDelay(min, ms) { return new Promise(r => setTimeout(r, min + Math.random() * (ms - min))); }
+
+function send(action, data) {
+  try { chrome.runtime.sendMessage({ action, ...(data || {}) }, () => {}); } catch (e) {}
 }
 
-function randomDelay(min, max) {
-  return new Promise(r => setTimeout(r, min + Math.random() * (max - min)));
+async function waitEl(sel, timeout = 8000) {
+  const el = document.querySelector(sel);
+  if (el) return el;
+  return new Promise(resolve => {
+    const mo = new MutationObserver(() => {
+      const f = document.querySelector(sel);
+      if (f) { mo.disconnect(); resolve(f); }
+    });
+    mo.observe(document.body, { childList: true, subtree: true });
+    setTimeout(() => { mo.disconnect(); resolve(null); }, timeout);
+  });
 }
 
-function scrollContainer() {
+function scrollJobs() {
   const c = document.querySelector(".jobs-search-results-list, .scaffold-layout__list");
-  if (c) { c.scrollTop = c.scrollHeight; }
-  else { window.scrollBy(0, 400); }
+  if (c) { c.scrollTop = c.scrollHeight; } else { window.scrollBy(0, 400); }
 }
 
 function getJobIds() {
-  const cards = document.querySelectorAll("[data-job-id]");
-  return [...new Set(Array.from(cards).map(c => c.getAttribute("data-job-id")).filter(Boolean))];
+  return [...new Set(Array.from(document.querySelectorAll("[data-job-id]")).map(c => c.getAttribute("data-job-id")).filter(Boolean))];
 }
 
-async function clickJobCard(jobId) {
-  const card = document.querySelector(`[data-job-id="${jobId}"]`);
-  if (!card) return false;
-  card.scrollIntoView({ behavior: "smooth", block: "center" });
-  await randomDelay(300, 700);
-  card.click();
-  await randomDelay(500, 1000);
-  return true;
-}
-
-function extractJobDetails(jobId) {
-  const data = {
-    job_id: jobId,
-    date_found: new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }),
-    position: "", company: "", location: "",
-    poster_name: "", poster_title: "", poster_profile_url: "",
-    job_url: `https://www.linkedin.com/jobs/view/${jobId}/`,
+function extractDetails(jobId) {
+  const d = {
+    job_id: jobId, date_found: new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }),
+    position: "", company: "", location: "", poster_name: "", poster_title: "", poster_profile_url: "",
+    job_url: "https://www.linkedin.com/jobs/view/" + jobId + "/",
     email: "", applied: "No", connection_sent: "No", notes: "", full_post: ""
   };
-
   try {
-    const el = document.querySelector(
-      ".jobs-unified-top-card__job-title h1, " +
-      ".t-24.t-bold.jobs-unified-top-card__job-title, " +
-      ".jobs-details-top-card__job-title"
-    );
-    if (el) data.position = el.innerText.trim();
-  } catch(e) {}
-
+    const el = document.querySelector(".jobs-unified-top-card__job-title h1, .t-24.t-bold.jobs-unified-top-card__job-title");
+    if (el) d.position = el.innerText.trim();
+  } catch (e) {}
   try {
-    const el = document.querySelector(
-      ".jobs-unified-top-card__company-name a, " +
-      ".jobs-unified-top-card__company-name, " +
-      ".jobs-details-top-card__company-info a"
-    );
-    if (el) data.company = el.innerText.trim();
-  } catch(e) {}
-
+    const el = document.querySelector(".jobs-unified-top-card__company-name a, .jobs-unified-top-card__company-name");
+    if (el) d.company = el.innerText.trim();
+  } catch (e) {}
   try {
-    const el = document.querySelector(
-      ".jobs-unified-top-card__bullet, " +
-      ".jobs-details-top-card__bullet, " +
-      ".jobs-unified-top-card__workplace-type"
-    );
-    if (el) data.location = el.innerText.trim();
-  } catch(e) {}
-
+    const el = document.querySelector(".jobs-unified-top-card__bullet, .jobs-unified-top-card__workplace-type");
+    if (el) d.location = el.innerText.trim();
+  } catch (e) {}
   try {
-    const btn = document.querySelector(
-      "button:has-text('see more'), button:has-text('Show more'), " +
-      ".jobs-description__footer button, .description__see-more-button"
-    );
-    if (btn && btn.offsetParent !== null) btn.click();
-  } catch(e) {}
-
-  try {
-    const desc = document.querySelector(
-      ".jobs-description-content, .jobs-box__body, main"
-    );
-    if (desc) {
-      const text = desc.innerText || "";
-      const emails = text.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g) || [];
-      data.email = [...new Set(emails)].filter(e => !e.includes(".png") && !e.includes(".jpg")).join(", ");
-      data.full_post = text.slice(0, 2000);
+    for (const b of document.querySelectorAll("button")) {
+      if (b.offsetParent !== null && b.innerText.toLowerCase().includes("see more")) { b.click(); break; }
     }
-  } catch(e) {}
-
-  const poster = extractPosterInfo();
-  Object.assign(data, poster);
-  return data;
+  } catch (e) {}
+  try {
+    const desc = document.querySelector(".jobs-description-content, .jobs-box__body, main");
+    if (desc) {
+      const txt = desc.innerText || "";
+      const emails = txt.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g) || [];
+      d.email = [...new Set(emails)].filter(e => !e.includes(".png") && !e.includes(".jpg")).join(", ");
+      d.full_post = txt.slice(0, 2000);
+    }
+  } catch (e) {}
+  Object.assign(d, extractPoster());
+  return d;
 }
 
-function extractPosterInfo() {
-  const result = { poster_name: "", poster_title: "", poster_profile_url: "" };
-  for (const sel of [
-    ".hirer-card__hirer-information", ".jobs-poster__name", ".jobs-contact-section"
-  ]) {
+function extractPoster() {
+  const r = { poster_name: "", poster_title: "", poster_profile_url: "" };
+  for (const sel of [".hirer-card__hirer-information", ".jobs-poster__name", ".jobs-contact-section"]) {
     const el = document.querySelector(sel);
     if (!el) continue;
     try {
       const n = el.querySelector("a span, .jobs-poster__name, strong, b, h3");
-      if (n) result.poster_name = n.innerText.trim();
-    } catch(e) {}
+      if (n) r.poster_name = n.innerText.trim();
+    } catch (e) {}
     try {
       const t = el.querySelector(".hirer-card__hirer-job-title, .jobs-poster__subtitle, .t-14");
-      if (t) result.poster_title = t.innerText.trim();
-    } catch(e) {}
+      if (t) r.poster_title = t.innerText.trim();
+    } catch (e) {}
     try {
       const a = el.querySelector("a");
       if (a) {
-        let href = a.getAttribute("href") || "";
-        if (href.startsWith("/")) href = "https://www.linkedin.com" + href;
-        result.poster_profile_url = href.split("?")[0];
+        let h = a.getAttribute("href") || "";
+        if (h.startsWith("/")) h = "https://www.linkedin.com" + h;
+        r.poster_profile_url = h.split("?")[0];
       }
-    } catch(e) {}
-    if (result.poster_name) break;
+    } catch (e) {}
+    if (r.poster_name) break;
   }
-  return result;
+  return r;
 }
 
-async function goToNextPage(currentPage) {
+async function clickCard(jobId) {
+  const card = document.querySelector(`[data-job-id="${jobId}"]`);
+  if (!card) return false;
+  card.scrollIntoView({ behavior: "smooth", block: "center" });
+  await randDelay(400, 900);
+  card.click();
+  await randDelay(600, 1200);
+  return true;
+}
+
+function buildUrl(keyword, location, config) {
+  const p = new URLSearchParams();
+  p.set("keywords", keyword);
+  if (location) p.set("location", location);
+  p.set("sortBy", "DD");
+  if (config.easyApplyOnly) p.set("f_AL", "true");
+  const d = config.postedWithinDays || 1;
+  if (d <= 1) p.set("f_TPR", "r86400");
+  else if (d <= 7) p.set("f_TPR", "r604800");
+  else if (d <= 30) p.set("f_TPR", "r2592000");
+  return "https://www.linkedin.com/jobs/search/?" + p.toString();
+}
+
+function matchPoster(title, targets) {
+  if (!targets || !targets.length) return true;
+  const l = (title || "").toLowerCase();
+  return targets.some(t => l.includes(t.toLowerCase()));
+}
+
+async function nextPage(page) {
   for (const sel of [
-    `button[aria-label="Page ${currentPage + 1}"]`,
-    `li.artdeco-pagination__indicator--number:nth-child(${currentPage + 1}) button`,
+    'button[aria-label="Page ' + (page + 1) + '"]',
     "button.artdeco-pagination__button--next:not([disabled])",
     "button.jobs-search-pagination__next-button:not([disabled])"
   ]) {
@@ -133,198 +132,107 @@ async function goToNextPage(currentPage) {
       const btn = document.querySelector(sel);
       if (btn && !btn.disabled) {
         btn.scrollIntoView({ block: "center" });
-        await randomDelay(300, 600);
+        await randDelay(300, 600);
         btn.click();
         await new Promise(r => setTimeout(r, 2500));
-        const newCards = await waitForElement("[data-job-id]", 5000);
-        return !!newCards;
+        return true;
       }
-    } catch(e) {}
+    } catch (e) {}
   }
   return false;
 }
 
-function waitForElement(selector, timeout) {
-  return new Promise(resolve => {
-    const el = document.querySelector(selector);
-    if (el) return resolve(el);
-    const obs = new MutationObserver(() => {
-      const found = document.querySelector(selector);
-      if (found) { obs.disconnect(); resolve(found); }
-    });
-    obs.observe(document.body, { childList: true, subtree: true });
-    setTimeout(() => { obs.disconnect(); resolve(null); }, timeout);
-  });
-}
+async function scrapePage(config, pageNum) {
+  const max = config.maxJobsPerRun || 50;
+  let found = 0;
 
-function matchesPoster(title, targets) {
-  if (!targets || !targets.length) return true;
-  const lower = (title || "").toLowerCase();
-  return targets.some(t => lower.includes(t.toLowerCase()));
-}
+  await waitEl("[data-job-id], .jobs-search-results-list", 12000);
+  await randDelay(1500, 2500);
 
-function buildSearchUrl(keyword, location, config) {
-  const p = new URLSearchParams();
-  p.set("keywords", keyword);
-  if (location) p.set("location", location);
-  p.set("sortBy", "DD");
-  if (config.easyApplyOnly) p.set("f_AL", "true");
-  const days = config.postedWithinDays || 1;
-  if (days <= 1) p.set("f_TPR", "r86400");
-  else if (days <= 7) p.set("f_TPR", "r604800");
-  else if (days <= 30) p.set("f_TPR", "r2592000");
-  return `https://www.linkedin.com/jobs/search/?${p.toString()}`;
-}
+  while (found < max && !shouldStop) {
+    scrollJobs();
+    await randDelay(600, 1000);
+    const ids = getJobIds();
+    if (!ids.length) { send("log", { text: "No job card IDs found on page " + pageNum }); break; }
 
-async function scrapeCurrentPage(config) {
-  const maxJobs = config.maxJobsPerRun || 50;
-  const stats = await chrome.storage.local.get("scrapeStats");
-  let total = stats.scrapeStats?.totalFound || 0;
-  let pageNum = stats.scrapeStats?.currentPage || 1;
-  const loaded = total;
+    send("log", { text: "Page " + pageNum + ": " + ids.length + " cards" });
 
-  await waitForElement("[data-job-id], .jobs-search-results-list", 10000);
-  await randomDelay(1500, 2500);
+    for (const id of ids) {
+      if (shouldStop || found >= max) break;
 
-  while (total < maxJobs && !shouldStop) {
-    scrollContainer();
-    await randomDelay(600, 1000);
+      const { jobs } = await chrome.storage.local.get("jobs");
+      if ((jobs || []).some(j => j.job_id === id)) { continue; }
 
-    const jobIds = getJobIds();
-    if (!jobIds.length) break;
+      if (!(await clickCard(id))) { continue; }
 
-    postMessage("log", { text: `Page ${pageNum}: ${jobIds.length} cards` });
-
-    for (const jid of jobIds) {
-      if (shouldStop || total >= maxJobs) break;
-
-      const existing = await chrome.storage.local.get("jobs");
-      const jobs = existing.jobs || [];
-      if (jobs.some(j => j.job_id === jid)) {
-        postMessage("log", { text: `Skipping duplicate: ${jid}` });
-        continue;
-      }
-
-      if (!(await clickJobCard(jid))) {
-        postMessage("log", { text: `Could not click: ${jid}` });
-        continue;
-      }
-
-      const details = extractJobDetails(jid);
-
-      if (!matchesPoster(details.poster_title, config.targetPosterTitles)) {
-        postMessage("log", { text: `Skipping - poster: ${details.poster_title || "?"}` });
-        continue;
-      }
-
+      const det = extractDetails(id);
+      if (!matchPoster(det.poster_title, config.targetPosterTitles)) { continue; }
       if (config.excludeCompanies && config.excludeCompanies.length) {
-        const co = (details.company || "").toLowerCase();
+        const co = (det.company || "").toLowerCase();
         if (config.excludeCompanies.some(e => co.includes(e.toLowerCase()))) continue;
       }
 
-      const saved = await Storage.saveJob(details);
-      if (saved) {
-        total++;
-        postMessage("jobFound", { job: details });
-        postMessage("log", { text: `[${total}] ${details.position} @ ${details.company}` });
-      }
-      await randomDelay(800, 2000);
+      const saved = await Storage.saveJob(det);
+      if (saved) { found++; send("jobFound", { job: det }); send("log", { text: "[" + found + "] " + det.position + " @ " + det.company }); }
+      await randDelay(800, 2000);
     }
-
-    if (shouldStop || total >= maxJobs) break;
-
-    const hasNext = await goToNextPage(pageNum);
-    if (!hasNext) break;
+    if (shouldStop || found >= max) break;
+    if (!(await nextPage(pageNum))) break;
     pageNum++;
-    await chrome.storage.local.set({
-      scrapeStats: { totalFound: total, currentPage: pageNum }
-    });
-    await randomDelay(1000, 2000);
   }
-
-  return total - loaded;
+  return found;
 }
 
-async function runAllQueries(config) {
-  scrapingActive = true;
+async function runAll(config) {
   shouldStop = false;
 
-  const queries = [];
-  for (const role of config.jobRoles) {
-    if (config.locations && config.locations.length) {
-      for (const loc of config.locations) {
-        queries.push({ keyword: role, location: loc, label: `${role} @ ${loc}` });
-      }
+  const qs = [];
+  for (const role of config.jobRoles || []) {
+    if ((config.locations || []).length) {
+      for (const loc of config.locations) qs.push({ k: role, l: loc, label: role + " @ " + loc });
     } else {
-      queries.push({ keyword: role, location: "", label: role });
+      qs.push({ k: role, l: "", label: role });
     }
   }
 
-  const savedState = await chrome.storage.session.get(SCRAPING_CONFIG_KEY);
-  const state = savedState[SCRAPING_CONFIG_KEY];
-  let startIdx = state?.currentQueryIndex || 0;
+  const saved = await chrome.storage.local.get(CFG_KEY);
+  const state = saved[CFG_KEY];
+  let idx = state ? state.idx : 0;
+  if (!state) { await chrome.storage.local.set({ scrapeStats: { found: 0, page: 1 } }); }
 
-  if (startIdx === 0 && !state?.pageDone) {
-    await chrome.storage.local.set({
-      scrapeStats: { totalFound: 0, currentPage: 1 }
-    });
-  }
+  for (let i = idx; i < qs.length && !shouldStop; i++) {
+    const q = qs[i];
+    const url = buildUrl(q.k, q.l, config);
 
-  for (let i = startIdx; i < queries.length && !shouldStop; i++) {
-    const q = queries[i];
-    const url = buildSearchUrl(q.keyword, q.location, config);
-
-    await chrome.storage.session.set({
-      [SCRAPING_CONFIG_KEY]: {
-        config,
-        queries,
-        currentQueryIndex: i,
-        currentPage: 1,
-        pageDone: i < startIdx,
-        url
-      }
-    });
-
-    postMessage("log", { text: `=== ${q.label} ===` });
+    await chrome.storage.local.set({ [CFG_KEY]: { idx: i, url: url, config: config, qs: qs } });
+    send("log", { text: "=== " + q.label + " ===" });
 
     if (window.location.href !== url) {
       window.location.href = url;
       return;
     }
 
-    await scrapeCurrentPage(config);
+    const n = await scrapePage(config, 1);
+    send("log", { text: "=== " + q.label + " complete: " + n + " jobs ===" });
   }
 
-  scrapingActive = false;
-  await chrome.storage.session.remove(SCRAPING_CONFIG_KEY);
+  await chrome.storage.local.remove(CFG_KEY);
   await chrome.storage.local.remove("scrapeStats");
-  postMessage("scrapingComplete", {});
+  send("scrapingComplete", {});
 }
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  if (msg.action === "startScraping") {
-    runAllQueries(msg.config || {}).catch(console.error);
-    sendResponse({ ok: true });
-    return true;
-  }
-  if (msg.action === "stopScraping") {
-    shouldStop = true;
-    scrapingActive = false;
-    sendResponse({ ok: true });
-  }
-  if (msg.action === "ping") {
-    sendResponse({ ok: true, active: scrapingActive });
-  }
+  if (msg.action === "startScraping") { runAll(msg.config || {}).catch(e => send("log", { text: "Error: " + e.message })); sendResponse({ ok: true }); return true; }
+  if (msg.action === "stopScraping") { shouldStop = true; sendResponse({ ok: true }); }
+  if (msg.action === "ping") { sendResponse({ ok: true }); }
 });
 
-(async () => {
-  const saved = await chrome.storage.session.get(SCRAPING_CONFIG_KEY);
-  const state = saved[SCRAPING_CONFIG_KEY];
-  if (state && state.config && state.url) {
-    if (window.location.href.includes("linkedin.com/jobs/search")) {
-      await randomDelay(500, 1000);
-      postMessage("log", { text: "Resuming scrape session..." });
-      await runAllQueries(state.config);
-    }
+(async function init() {
+  const saved = await chrome.storage.local.get(CFG_KEY);
+  const state = saved[CFG_KEY];
+  if (state && state.config && window.location.href.includes("linkedin.com/jobs/search")) {
+    await randDelay(500, 1000);
+    send("log", { text: "Resuming session..." });
+    await runAll(state.config);
   }
 })();

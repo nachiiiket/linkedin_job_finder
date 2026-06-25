@@ -13,7 +13,9 @@ async function getLinkedInTab() {
 
 async function ensureContentPort(tabId) {
   return new Promise(resolve => {
+    const timer = setTimeout(() => resolve(false), 4000);
     chrome.tabs.sendMessage(tabId, { action: "ping" }, res => {
+      clearTimeout(timer);
       resolve(!!(res && res.ok));
     });
   });
