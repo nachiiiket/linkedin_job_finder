@@ -16,7 +16,7 @@
   "content_scripts": [
     {
       "matches": ["https://*.linkedin.com/*"],
-      "js": ["utils/storage.js", "content.js"],
+      "js": ["utils/storage.js", "utils/parser.js", "content.js"],
       "run_at": "document_idle"
     }
   ],

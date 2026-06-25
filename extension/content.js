@@ -1,238 +1,288 @@
-const CFG_KEY = "activeScrapeConfig";
-
 let shouldStop = false;
 
-function randDelay(min, ms) { return new Promise(r => setTimeout(r, min + Math.random() * (ms - min))); }
+function rand(lo, hi) { return new Promise(r => setTimeout(r, lo + Math.random() * (hi - lo))); }
+function send(a, d) { try { chrome.runtime.sendMessage({ action: a, ...(d || {}) }, () => {}); } catch (e) {} }
 
-function send(action, data) {
-  try { chrome.runtime.sendMessage({ action, ...(data || {}) }, () => {}); } catch (e) {}
-}
-
-async function waitEl(sel, timeout = 8000) {
-  const el = document.querySelector(sel);
-  if (el) return el;
-  return new Promise(resolve => {
-    const mo = new MutationObserver(() => {
-      const f = document.querySelector(sel);
-      if (f) { mo.disconnect(); resolve(f); }
-    });
+function waitEl(sel, t) {
+  const el = document.querySelector(sel); if (el) return el;
+  return new Promise(r => {
+    const mo = new MutationObserver(() => { const f = document.querySelector(sel); if (f) { mo.disconnect(); r(f); } });
     mo.observe(document.body, { childList: true, subtree: true });
-    setTimeout(() => { mo.disconnect(); resolve(null); }, timeout);
+    setTimeout(() => { mo.disconnect(); r(null); }, t || 8000);
   });
 }
 
-function scrollJobs() {
-  const c = document.querySelector(".jobs-search-results-list, .scaffold-layout__list");
-  if (c) { c.scrollTop = c.scrollHeight; } else { window.scrollBy(0, 400); }
+/* ====== JOBS SEARCH ====== */
+
+function jobsUrl(kw, loc, cfg) {
+  const p = new URLSearchParams();
+  p.set("keywords", kw); if (loc) p.set("location", loc);
+  p.set("sortBy", "DD");
+  if (cfg.easyApplyOnly) p.set("f_AL", "true");
+  const d = cfg.postedWithinDays || 1; p.set("f_TPR", d <= 1 ? "r86400" : d <= 7 ? "r604800" : "r2592000");
+  return "https://www.linkedin.com/jobs/search/?" + p;
 }
 
 function getJobIds() {
   return [...new Set(Array.from(document.querySelectorAll("[data-job-id]")).map(c => c.getAttribute("data-job-id")).filter(Boolean))];
 }
 
-function extractDetails(jobId) {
-  const d = {
-    job_id: jobId, date_found: new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }),
+function scrollJobs() {
+  const c = document.querySelector(".jobs-search-results-list, .scaffold-layout__list");
+  if (c) c.scrollTop = c.scrollHeight; else window.scrollBy(0, 400);
+}
+
+async function clickCard(jid) {
+  const card = document.querySelector(`[data-job-id="${jid}"]`);
+  if (!card) return false;
+  card.scrollIntoView({ behavior: "smooth", block: "center" });
+  await rand(400, 900);
+  card.click(); await rand(600, 1200);
+  return true;
+}
+
+function extractJob(jid) {
+  const d = { job_id: jid, date_found: new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }),
     position: "", company: "", location: "", poster_name: "", poster_title: "", poster_profile_url: "",
-    job_url: "https://www.linkedin.com/jobs/view/" + jobId + "/",
-    email: "", applied: "No", connection_sent: "No", notes: "", full_post: ""
-  };
-  try {
-    const el = document.querySelector(".jobs-unified-top-card__job-title h1, .t-24.t-bold.jobs-unified-top-card__job-title");
-    if (el) d.position = el.innerText.trim();
-  } catch (e) {}
-  try {
-    const el = document.querySelector(".jobs-unified-top-card__company-name a, .jobs-unified-top-card__company-name");
-    if (el) d.company = el.innerText.trim();
-  } catch (e) {}
-  try {
-    const el = document.querySelector(".jobs-unified-top-card__bullet, .jobs-unified-top-card__workplace-type");
-    if (el) d.location = el.innerText.trim();
-  } catch (e) {}
-  try {
-    for (const b of document.querySelectorAll("button")) {
-      if (b.offsetParent !== null && b.innerText.toLowerCase().includes("see more")) { b.click(); break; }
-    }
-  } catch (e) {}
+    job_url: "https://www.linkedin.com/jobs/view/" + jid + "/", email: "", applied: "No", connection_sent: "No", notes: "", full_post: "" };
+  try { const e = document.querySelector(".jobs-unified-top-card__job-title h1, .t-24.t-bold.jobs-unified-top-card__job-title"); if (e) d.position = e.innerText.trim(); } catch(e) {}
+  try { const e = document.querySelector(".jobs-unified-top-card__company-name a, .jobs-unified-top-card__company-name"); if (e) d.company = e.innerText.trim(); } catch(e) {}
+  try { const e = document.querySelector(".jobs-unified-top-card__bullet, .jobs-unified-top-card__workplace-type"); if (e) d.location = e.innerText.trim(); } catch(e) {}
+  try { for (const b of document.querySelectorAll("button")) { if (b.offsetParent !== null && b.innerText.toLowerCase().includes("see more")) { b.click(); break; } } } catch(e) {}
   try {
     const desc = document.querySelector(".jobs-description-content, .jobs-box__body, main");
-    if (desc) {
-      const txt = desc.innerText || "";
-      const emails = txt.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g) || [];
-      d.email = [...new Set(emails)].filter(e => !e.includes(".png") && !e.includes(".jpg")).join(", ");
-      d.full_post = txt.slice(0, 2000);
-    }
-  } catch (e) {}
-  Object.assign(d, extractPoster());
+    if (desc) { const t = desc.innerText || ""; const emails = t.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g) || []; d.email = [...new Set(emails)].filter(e => !e.includes(".png") && !e.includes(".jpg")).join(", "); d.full_post = t.slice(0, 2000); }
+  } catch(e) {}
+  Object.assign(d, posterInfo());
   return d;
 }
 
-function extractPoster() {
+function posterInfo() {
   const r = { poster_name: "", poster_title: "", poster_profile_url: "" };
   for (const sel of [".hirer-card__hirer-information", ".jobs-poster__name", ".jobs-contact-section"]) {
-    const el = document.querySelector(sel);
-    if (!el) continue;
-    try {
-      const n = el.querySelector("a span, .jobs-poster__name, strong, b, h3");
-      if (n) r.poster_name = n.innerText.trim();
-    } catch (e) {}
-    try {
-      const t = el.querySelector(".hirer-card__hirer-job-title, .jobs-poster__subtitle, .t-14");
-      if (t) r.poster_title = t.innerText.trim();
-    } catch (e) {}
-    try {
-      const a = el.querySelector("a");
-      if (a) {
-        let h = a.getAttribute("href") || "";
-        if (h.startsWith("/")) h = "https://www.linkedin.com" + h;
-        r.poster_profile_url = h.split("?")[0];
-      }
-    } catch (e) {}
+    const el = document.querySelector(sel); if (!el) continue;
+    try { const n = el.querySelector("a span, .jobs-poster__name, strong, b, h3"); if (n) r.poster_name = n.innerText.trim(); } catch(e) {}
+    try { const t = el.querySelector(".hirer-card__hirer-job-title, .jobs-poster__subtitle, .t-14"); if (t) r.poster_title = t.innerText.trim(); } catch(e) {}
+    try { const a = el.querySelector("a"); if (a) { let h = a.getAttribute("href") || ""; if (h.startsWith("/")) h = "https://www.linkedin.com" + h; r.poster_profile_url = h.split("?")[0]; } } catch(e) {}
     if (r.poster_name) break;
   }
   return r;
 }
 
-async function clickCard(jobId) {
-  const card = document.querySelector(`[data-job-id="${jobId}"]`);
-  if (!card) return false;
-  card.scrollIntoView({ behavior: "smooth", block: "center" });
-  await randDelay(400, 900);
-  card.click();
-  await randDelay(600, 1200);
-  return true;
-}
-
-function buildUrl(keyword, location, config) {
-  const p = new URLSearchParams();
-  p.set("keywords", keyword);
-  if (location) p.set("location", location);
-  p.set("sortBy", "DD");
-  if (config.easyApplyOnly) p.set("f_AL", "true");
-  const d = config.postedWithinDays || 1;
-  if (d <= 1) p.set("f_TPR", "r86400");
-  else if (d <= 7) p.set("f_TPR", "r604800");
-  else if (d <= 30) p.set("f_TPR", "r2592000");
-  return "https://www.linkedin.com/jobs/search/?" + p.toString();
-}
-
-function matchPoster(title, targets) {
-  if (!targets || !targets.length) return true;
-  const l = (title || "").toLowerCase();
-  return targets.some(t => l.includes(t.toLowerCase()));
-}
-
-async function nextPage(page) {
-  for (const sel of [
-    'button[aria-label="Page ' + (page + 1) + '"]',
-    "button.artdeco-pagination__button--next:not([disabled])",
-    "button.jobs-search-pagination__next-button:not([disabled])"
-  ]) {
+async function nextJobPage(pg) {
+  for (const sel of ['button[aria-label="Page ' + (pg + 1) + '"]', "button.artdeco-pagination__button--next:not([disabled])", "button.jobs-search-pagination__next-button:not([disabled])"]) {
     try {
       const btn = document.querySelector(sel);
-      if (btn && !btn.disabled) {
-        btn.scrollIntoView({ block: "center" });
-        await randDelay(300, 600);
-        btn.click();
-        await new Promise(r => setTimeout(r, 2500));
-        return true;
-      }
-    } catch (e) {}
+      if (btn && !btn.disabled) { btn.scrollIntoView({ block: "center" }); await rand(300, 600); btn.click(); await new Promise(r => setTimeout(r, 2500)); return true; }
+    } catch(e) {}
   }
   return false;
 }
 
-async function scrapePage(config, pageNum) {
-  const max = config.maxJobsPerRun || 50;
-  let found = 0;
-
+async function scrapeJobs(cfg) {
+  const max = cfg.maxJobsPerRun || 50;
   await waitEl("[data-job-id], .jobs-search-results-list", 12000);
-  await randDelay(1500, 2500);
+  await rand(1500, 2500);
+  let found = 0, pg = 1;
 
   while (found < max && !shouldStop) {
-    scrollJobs();
-    await randDelay(600, 1000);
+    scrollJobs(); await rand(600, 1000);
     const ids = getJobIds();
-    if (!ids.length) { send("log", { text: "No job card IDs found on page " + pageNum }); break; }
-
-    send("log", { text: "Page " + pageNum + ": " + ids.length + " cards" });
+    if (!ids.length) { send("log", { text: "No job cards on page " + pg }); break; }
+    send("log", { text: "Jobs Page " + pg + ": " + ids.length + " cards" });
 
     for (const id of ids) {
       if (shouldStop || found >= max) break;
-
       const { jobs } = await chrome.storage.local.get("jobs");
-      if ((jobs || []).some(j => j.job_id === id)) { continue; }
-
-      if (!(await clickCard(id))) { continue; }
-
-      const det = extractDetails(id);
-      if (!matchPoster(det.poster_title, config.targetPosterTitles)) { continue; }
-      if (config.excludeCompanies && config.excludeCompanies.length) {
-        const co = (det.company || "").toLowerCase();
-        if (config.excludeCompanies.some(e => co.includes(e.toLowerCase()))) continue;
+      if ((jobs || []).some(j => j.job_id === id)) continue;
+      if (!(await clickCard(id))) continue;
+      const det = extractJob(id);
+      if (cfg.excludeCompanies && cfg.excludeCompanies.length) {
+        if (cfg.excludeCompanies.some(e => (det.company || "").toLowerCase().includes(e.toLowerCase()))) continue;
       }
-
       const saved = await Storage.saveJob(det);
-      if (saved) { found++; send("jobFound", { job: det }); send("log", { text: "[" + found + "] " + det.position + " @ " + det.company }); }
-      await randDelay(800, 2000);
+      if (saved) { found++; send("jobFound", { job: det }); }
+      await rand(800, 2000);
     }
     if (shouldStop || found >= max) break;
-    if (!(await nextPage(pageNum))) break;
-    pageNum++;
+    if (!(await nextJobPage(pg))) break;
+    pg++;
   }
   return found;
 }
 
-async function runAll(config) {
-  shouldStop = false;
+/* ====== POSTS SEARCH ====== */
 
+function postsUrl(query) {
+  return "https://www.linkedin.com/search/results/content/?keywords=" + encodeURIComponent(query) + "&origin=GLOBAL_SEARCH_HEADER&sortBy=%22date_posted%22&f_TPR=r86400";
+}
+
+function generateQueries(roles) {
   const qs = [];
-  for (const role of config.jobRoles || []) {
-    if ((config.locations || []).length) {
-      for (const loc of config.locations) qs.push({ k: role, l: loc, label: role + " @ " + loc });
-    } else {
-      qs.push({ k: role, l: "", label: role });
+  for (const role of roles) qs.push({ query: '"Hiring" AND "' + role + '"', label: role, role: role });
+  return qs;
+}
+
+function clickSeeMore(el) {
+  for (const b of el.querySelectorAll("button, span[role='button']")) {
+    const t = (b.textContent || "").trim().toLowerCase();
+    if (["see more", "…more", "...more", "show more"].includes(t)) { b.click(); }
+  }
+}
+
+function extractPostMeta(el) {
+  let profileUrl = "", dateText = "";
+  for (const a of el.querySelectorAll('a[href*="/in/"]')) {
+    const h = a.href || "";
+    if (h.includes("/in/") && !h.includes("/feed/")) { profileUrl = h.split("?")[0]; break; }
+  }
+  const timeEl = el.querySelector("time");
+  if (timeEl) dateText = (timeEl.getAttribute("datetime") || timeEl.textContent || "").trim();
+  if (!dateText) { const sp = el.querySelector(".feed-shared-actor__sub-description"); if (sp) dateText = sp.textContent.trim(); }
+  return { profileUrl, dateText };
+}
+
+function extractPosterFromFeed(el) {
+  const r = { poster_name: "", poster_title: "", poster_profile_url: "" };
+  const actor = el.querySelector(".feed-shared-actor__name, .update-components-actor__name, a[href*='/in/']");
+  if (actor) {
+    const spans = actor.querySelectorAll("span[dir='ltr'], span[dir='auto']");
+    r.poster_name = Array.from(spans).map(s => s.textContent.trim()).filter(Boolean).join(" ") || actor.textContent.trim();
+    r.poster_profile_url = actor.getAttribute("href") || "";
+    if (r.poster_profile_url.startsWith("/")) r.poster_profile_url = "https://www.linkedin.com" + r.poster_profile_url;
+    r.poster_profile_url = r.poster_profile_url.split("?")[0];
+  }
+  const titleEl = el.querySelector(".feed-shared-actor__description, .update-components-actor__subtitle");
+  if (titleEl) r.poster_title = titleEl.textContent.trim();
+  return r;
+}
+
+function extractPostText(el) {
+  const textEl = el.querySelector(".feed-shared-text__text-view, .update-components-text, .feed-shared-update-v2__description, .search-result__content");
+  if (textEl) {
+    const cloned = textEl.cloneNode(true);
+    for (const s of cloned.querySelectorAll("button, .visually-hidden, [aria-hidden='true']")) s.remove();
+    return cloned.textContent.trim();
+  }
+  return "";
+}
+
+async function scrapePosts(cfg) {
+  const max = cfg.maxJobsPerRun || 50;
+  await waitEl(".feed-shared-update-v2, [data-urn*='activity'], li.reusable-search__result-container, .search-content__result", 12000);
+  await rand(1500, 2500);
+  let found = 0;
+
+  const getPosts = () => {
+    for (const sel of [".feed-shared-update-v2", "[data-urn*='activity']", "li.reusable-search__result-container", ".search-content__result"]) {
+      const els = document.querySelectorAll(sel);
+      if (els.length >= 2) return Array.from(els);
     }
+    return [];
+  };
+
+  while (found < max && !shouldStop) {
+    scrollJobs(); await rand(1000, 1500);
+    const els = getPosts();
+    send("log", { text: "Found " + els.length + " posts on page" });
+
+    for (const el of els) {
+      if (shouldStop || found >= max) break;
+
+      clickSeeMore(el);
+      await rand(200, 400);
+
+      const text = (el.innerText || "").trim();
+      if (text.length < 80) continue;
+
+      const meta = extractPostMeta(el);
+      const poster = extractPosterFromFeed(el);
+      const parsed = LinkedinParser.parsePost(text, meta.profileUrl || poster.poster_profile_url, meta.dateText, "");
+
+      if (!parsed) continue;
+      if (!parsed.poster_name && !parsed.email) continue;
+
+      Object.assign(parsed, poster);
+
+      const saved = await Storage.saveJob(parsed);
+      if (saved) {
+        found++;
+        send("jobFound", { job: parsed });
+        send("log", { text: "[" + found + "] Post: " + (parsed.poster_name || "?") + (parsed.email ? " - " + parsed.email : "") + (parsed.company ? " @ " + parsed.company : "") });
+      }
+      await rand(500, 1200);
+    }
+
+    scrollJobs();
+    await rand(2000, 3000);
+  }
+  return found;
+}
+
+/* ====== MAIN ====== */
+
+async function runAll(cfg) {
+  const state = await Storage.getState();
+  if (state.stopRequested) { await chrome.storage.local.remove("activeScrapeConfig"); return; }
+
+  const mode = cfg.searchMode || "jobs";
+  let queries = [], scraper, urlBuilder, label;
+
+  if (mode === "posts") {
+    queries = generateQueries(cfg.jobRoles || []);
+    scraper = scrapePosts;
+    urlBuilder = q => postsUrl(q.query);
+    label = q => "Posts: " + q.label;
+  } else {
+    for (const role of cfg.jobRoles || []) {
+      if ((cfg.locations || []).length) { for (const loc of cfg.locations) queries.push({ keyword: role, location: loc, label: role + " @ " + loc }); }
+      else { queries.push({ keyword: role, location: "", label: role }); }
+    }
+    scraper = scrapeJobs;
+    urlBuilder = q => jobsUrl(q.keyword, q.location, cfg);
+    label = q => "Jobs: " + q.label;
   }
 
-  const saved = await chrome.storage.local.get(CFG_KEY);
-  const state = saved[CFG_KEY];
-  let idx = state ? state.idx : 0;
-  if (!state) { await chrome.storage.local.set({ scrapeStats: { found: 0, page: 1 } }); }
+  const saved = await chrome.storage.local.get("activeScrapeConfig");
+  const sc = saved.activeScrapeConfig;
+  let idx = sc ? sc.idx : 0;
 
-  for (let i = idx; i < qs.length && !shouldStop; i++) {
-    const q = qs[i];
-    const url = buildUrl(q.k, q.l, config);
+  await Storage.setState({ status: "scraping", mode, totalFound: 0 });
 
-    await chrome.storage.local.set({ [CFG_KEY]: { idx: i, url: url, config: config, qs: qs } });
-    send("log", { text: "=== " + q.label + " ===" });
+  for (let i = idx; i < queries.length && !shouldStop; i++) {
+    const q = queries[i];
+    const url = urlBuilder(q);
 
-    if (window.location.href !== url) {
-      window.location.href = url;
-      return;
-    }
+    await chrome.storage.local.set({ activeScrapeConfig: { idx: i, url, config: cfg, queries } });
+    send("log", { text: "=== " + label(q) + " ===" });
 
-    const n = await scrapePage(config, 1);
-    send("log", { text: "=== " + q.label + " complete: " + n + " jobs ===" });
+    if (window.location.href !== url) { window.location.href = url; return; }
+
+    const found = await scraper(cfg);
+    send("log", { text: "=== Complete: " + found + " items ===" });
   }
 
-  await chrome.storage.local.remove(CFG_KEY);
-  await chrome.storage.local.remove("scrapeStats");
+  await chrome.storage.local.remove("activeScrapeConfig");
+  await Storage.setState({ status: "idle", mode, totalFound: 0 });
+  shouldStop = false;
   send("scrapingComplete", {});
 }
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  if (msg.action === "startScraping") { runAll(msg.config || {}).catch(e => send("log", { text: "Error: " + e.message })); sendResponse({ ok: true }); return true; }
-  if (msg.action === "stopScraping") { shouldStop = true; sendResponse({ ok: true }); }
+  if (msg.action === "startScraping") { sendResponse({ ok: true }); shouldStop = false; runAll(msg.config || {}).catch(e => send("log", { text: "Error: " + e.message })); return true; }
+  if (msg.action === "stopScraping") { sendResponse({ ok: true }); shouldStop = true; Storage.setState({ stopRequested: true }); }
   if (msg.action === "ping") { sendResponse({ ok: true }); }
 });
 
 (async function init() {
-  const saved = await chrome.storage.local.get(CFG_KEY);
-  const state = saved[CFG_KEY];
-  if (state && state.config && window.location.href.includes("linkedin.com/jobs/search")) {
-    await randDelay(500, 1000);
-    send("log", { text: "Resuming session..." });
-    await runAll(state.config);
+  const saved = await chrome.storage.local.get("activeScrapeConfig");
+  const sc = saved.activeScrapeConfig;
+  if (!sc || !sc.config) return;
+  const stopReq = await Storage.getState();
+  if (stopReq.stopRequested) { await chrome.storage.local.remove("activeScrapeConfig"); await Storage.setState({ stopRequested: false }); return; }
+  if (window.location.href.includes("linkedin.com/jobs/search") || window.location.href.includes("linkedin.com/search/results/content")) {
+    await rand(500, 1000);
+    send("log", { text: "Resuming scrape session..." });
+    await runAll(sc.config);
   }
 })();

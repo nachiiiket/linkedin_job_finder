@@ -1,95 +1,55 @@
 <!DOCTYPE html>
 <html>
-<head>
-  <meta charset="UTF-8">
-  <title>LinkedIn Job Finder - Dashboard</title>
-  <link rel="stylesheet" href="styles.css">
-</head>
+<head><meta charset="UTF-8"><title>LinkedIn Job Finder</title><link rel="stylesheet" href="styles.css"></head>
 <body>
-  <div class="dashboard-container">
-    <header class="dashboard-header">
-      <h1><img src="icons/icon48.png" alt="" class="header-icon"> LinkedIn Job Finder</h1>
-      <div class="header-actions">
-        <button id="btnStart" class="btn btn-primary">Start Scraping</button>
-        <button id="btnStop" class="btn btn-danger" style="display:none">Stop</button>
-        <button id="btnExportCSV" class="btn btn-secondary">Export CSV</button>
-        <button id="btnExportXLS" class="btn btn-secondary">Export XLS</button>
-        <button id="btnClear" class="btn btn-outline">Clear All</button>
-      </div>
-    </header>
-
-    <div class="dashboard-grid">
-      <section class="card config-section">
-        <h2>Preferences</h2>
-        <p class="section-desc">These sync across your Chrome profile.</p>
-
-        <div class="form-group">
-          <label for="jobRoles">Job Roles (one per line)</label>
-          <textarea id="jobRoles" rows="6" placeholder="AI Engineer&#10;ML Engineer&#10;..."></textarea>
-        </div>
-
-        <div class="form-group">
-          <label for="locations">Locations (one per line)</label>
-          <textarea id="locations" rows="3" placeholder="Pune&#10;Bangalore&#10;..."></textarea>
-        </div>
-
-        <div class="form-group">
-          <label for="excludeCompanies">Exclude Companies (one per line)</label>
-          <textarea id="excludeCompanies" rows="2" placeholder="Amazon&#10;Google"></textarea>
-        </div>
-
-        <div class="form-row">
-          <div class="form-group half">
-            <label for="easyApplyOnly">
-              <input type="checkbox" id="easyApplyOnly"> Easy Apply only
-            </label>
-          </div>
-          <div class="form-group half">
-            <label for="postedWithinDays">Posted within (days)</label>
-            <input type="number" id="postedWithinDays" min="1" max="30" value="1">
-          </div>
-        </div>
-
-        <div class="form-group">
-          <label for="maxJobsPerRun">Max jobs per run</label>
-          <input type="number" id="maxJobsPerRun" min="1" max="200" value="50">
-        </div>
-
-        <button id="btnSavePrefs" class="btn btn-primary">Save Preferences</button>
-        <span id="saveStatus" class="save-status"></span>
-      </section>
-
-      <section class="card results-section">
-        <h2>Results</h2>
-        <div class="stats-bar">
-          <div class="stat"><span id="dashTotal" class="stat-number">0</span> Total</div>
-          <div class="stat"><span id="dashApplied" class="stat-number">0</span> Applied</div>
-          <div class="stat"><span id="dashConnected" class="stat-number">0</span> Connected</div>
-        </div>
-
-        <div class="table-wrapper">
-          <table id="jobsTable" class="jobs-table">
-            <thead>
-              <tr>
-                <th>Position</th>
-                <th>Company</th>
-                <th>Location</th>
-                <th>Poster</th>
-                <th>Date Found</th>
-                <th>Applied</th>
-                <th>Connected</th>
-                <th>Email</th>
-              </tr>
-            </thead>
-            <tbody id="jobsBody"></tbody>
-          </table>
-        </div>
-        <p id="emptyMsg" class="empty-msg">No jobs tracked yet. Start scraping to find jobs.</p>
-      </section>
+<div class="dashboard-container">
+  <header class="dashboard-header">
+    <h1><img src="icons/icon48.png" alt="" class="header-icon"> LinkedIn Job Finder</h1>
+    <div class="header-actions">
+      <select id="dashSearchMode">
+        <option value="jobs">Search Jobs</option>
+        <option value="posts">Search Posts</option>
+        <option value="both">Both</option>
+      </select>
+      <button id="btnStart" class="btn btn-primary">Start</button>
+      <button id="btnStop" class="btn btn-danger" style="display:none">Stop</button>
+      <button id="btnExportCSV" class="btn btn-secondary">CSV</button>
+      <button id="btnExportXLS" class="btn btn-secondary">XLS</button>
+      <button id="btnClear" class="btn btn-outline">Clear</button>
     </div>
+  </header>
+
+  <div class="dashboard-grid">
+    <section class="card config-section">
+      <h2>Preferences</h2>
+      <div class="form-group"><label>Job Roles (one per line)</label><textarea id="jobRoles" rows="6" placeholder="AI Engineer"></textarea></div>
+      <div class="form-group"><label>Locations (one per line)</label><textarea id="locations" rows="3" placeholder="Pune"></textarea></div>
+      <div class="form-group"><label>Exclude Companies (one per line)</label><textarea id="excludeCompanies" rows="2"></textarea></div>
+      <div class="form-row">
+        <div class="form-group half"><label><input type="checkbox" id="easyApplyOnly"> Easy Apply only</label></div>
+        <div class="form-group half"><label>Posted within (days)</label><input type="number" id="postedWithinDays" min="1" max="30" value="1"></div>
+      </div>
+      <div class="form-group"><label>Max per run</label><input type="number" id="maxJobsPerRun" min="1" max="200" value="50"></div>
+      <button id="btnSavePrefs" class="btn btn-primary">Save</button><span id="saveStatus" class="save-status"></span>
+    </section>
+
+    <section class="card results-section">
+      <h2>Results</h2>
+      <div class="stats-bar">
+        <div class="stat"><span id="dashTotal" class="stat-number">0</span> Total</div>
+        <div class="stat"><span id="dashApplied" class="stat-number">0</span> Applied</div>
+        <div class="stat"><span id="dashConnected" class="stat-number">0</span> Connected</div>
+      </div>
+      <div class="table-wrapper">
+        <table class="jobs-table"><thead><tr><th>Position</th><th>Company</th><th>Location</th><th>Poster</th><th>Email</th><th>Date</th></tr></thead>
+        <tbody id="jobsBody"></tbody></table>
+      </div>
+      <p id="emptyMsg" class="empty-msg">No jobs tracked yet.</p>
+    </section>
   </div>
-  <script src="utils/storage.js"></script>
-  <script src="utils/exporter.js"></script>
-  <script src="dashboard.js"></script>
+</div>
+<script src="utils/storage.js"></script>
+<script src="utils/exporter.js"></script>
+<script src="dashboard.js"></script>
 </body>
 </html>
