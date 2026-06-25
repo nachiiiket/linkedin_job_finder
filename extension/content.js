@@ -221,45 +221,58 @@ async function scrapePosts(cfg) {
 
 /* ====== MAIN ====== */
 
-async function runAll(cfg) {
-  const state = await Storage.getState();
-  if (state.stopRequested) { await chrome.storage.local.remove("activeScrapeConfig"); return; }
-
-  const mode = cfg.searchMode || "jobs";
-  let queries = [], scraper, urlBuilder, label;
-
-  if (mode === "posts") {
-    queries = generateQueries(cfg.jobRoles || []);
-    scraper = scrapePosts;
-    urlBuilder = q => postsUrl(q.query);
-    label = q => "Posts: " + q.label;
+function buildPhaseQueries(cfg, phase) {
+  const qs = [];
+  if (phase === "posts") {
+    for (const role of cfg.jobRoles || []) qs.push({ keyword: role, location: "", label: "Posts: " + role, query: '"Hiring" AND "' + role + '"', _posts: true });
   } else {
     for (const role of cfg.jobRoles || []) {
-      if ((cfg.locations || []).length) { for (const loc of cfg.locations) queries.push({ keyword: role, location: loc, label: role + " @ " + loc }); }
-      else { queries.push({ keyword: role, location: "", label: role }); }
+      if ((cfg.locations || []).length) { for (const loc of cfg.locations) qs.push({ keyword: role, location: loc, label: "Jobs: " + role + " @ " + loc, _posts: false }); }
+      else { qs.push({ keyword: role, location: "", label: "Jobs: " + role, _posts: false }); }
     }
-    scraper = scrapeJobs;
-    urlBuilder = q => jobsUrl(q.keyword, q.location, cfg);
-    label = q => "Jobs: " + q.label;
   }
+  return qs;
+}
 
-  const saved = await chrome.storage.local.get("activeScrapeConfig");
-  const sc = saved.activeScrapeConfig;
-  let idx = sc ? sc.idx : 0;
+async function runPhase(cfg, phase, startIdx) {
+  const queries = buildPhaseQueries(cfg, phase);
+  const scraper = phase === "posts" ? scrapePosts : scrapeJobs;
 
-  await Storage.setState({ status: "scraping", mode, totalFound: 0 });
-
-  for (let i = idx; i < queries.length && !shouldStop; i++) {
+  for (let i = startIdx; i < queries.length && !shouldStop; i++) {
     const q = queries[i];
-    const url = urlBuilder(q);
+    const url = q._posts ? postsUrl(q.query) : jobsUrl(q.keyword, q.location, cfg);
 
-    await chrome.storage.local.set({ activeScrapeConfig: { idx: i, url, config: cfg, queries } });
-    send("log", { text: "=== " + label(q) + " ===" });
+    await chrome.storage.local.set({ activeScrapeConfig: { phase, idx: i, url, config: cfg } });
+    send("log", { text: "=== " + q.label + " ===" });
 
     if (window.location.href !== url) { window.location.href = url; return; }
 
     const found = await scraper(cfg);
     send("log", { text: "=== Complete: " + found + " items ===" });
+  }
+  return true;
+}
+
+async function runAll(cfg) {
+  const state = await Storage.getState();
+  if (state.stopRequested) { await chrome.storage.local.remove("activeScrapeConfig"); return; }
+
+  const mode = cfg.searchMode || "jobs";
+  const phases = mode === "both" ? ["jobs", "posts"] : [mode === "posts" ? "posts" : "jobs"];
+
+  const saved = await chrome.storage.local.get("activeScrapeConfig");
+  let sc = saved.activeScrapeConfig;
+  let phaseStart = sc ? phases.indexOf(sc.phase) : 0;
+  if (phaseStart < 0) phaseStart = 0;
+
+  await Storage.setState({ status: "scraping", mode, totalFound: 0 });
+
+  for (let p = phaseStart; p < phases.length && !shouldStop; p++) {
+    const phase = phases[p];
+    const idx = (sc && sc.phase === phase) ? (sc.idx || 0) : 0;
+    const done = await runPhase(cfg, phase, idx);
+    if (!done) return;
+    sc = null;
   }
 
   await chrome.storage.local.remove("activeScrapeConfig");
