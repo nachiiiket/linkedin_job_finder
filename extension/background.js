@@ -4,7 +4,7 @@ let activeTabId = null;
 let pendingConfig = null;
 
 async function getLinkedInTab() {
-  const tabs = await chrome.tabs.query({ url: "https://www.linkedin.com/*" });
+  const tabs = await chrome.tabs.query({ url: "https://*.linkedin.com/*" });
   if (tabs.length > 0) return tabs[0];
   const allTabs = await chrome.tabs.query({});
   const liTab = allTabs.find(t => t.url && t.url.includes("linkedin.com"));
